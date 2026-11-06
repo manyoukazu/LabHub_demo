@@ -20,8 +20,6 @@ function render(){
  for(const k of Object.keys(kinds))$(`#${k}-count`).textContent=ideas.filter(v=>v.kind===k).length;
  $('#result-count').textContent=`${rows.length} 件`;
  $$('.view-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
- const title=view==='favorites'?'あとで育てたい、ひらめき':view==='list'?'研究の種を、ストックする':'ひらめきが、つながる場所';
- $('#page-title').innerHTML=title+'<span>.</span>';
  $('#graph-panel').hidden=view!=='graph';$('#list-panel').hidden=view==='graph';
  if(view==='graph')renderGraph(rows);else renderList(rows);
  renderDetail();
