@@ -2,11 +2,25 @@ import {seed} from './seed.js';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const kinds={lab:{name:'研究室内の研究',color:'#c0d6f4',class:'blue'},spark:{name:'先輩・教授のアイデア',color:'#c0e6d3',class:'green'},external:{name:'関連する外部の研究',color:'#f4dfa8',class:'yellow'}};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const storageKey='labhub-demo-v1',favoriteKey='labhub-favorites-v1';
+const storageKey='labhub-demo-v1',favoriteKey='labhub-favorites-v1',positionKey='labhub-node-positions-v1';
 let ideas=[],favorites=new Set(),view='graph',selected='s1',activeKinds=new Set(Object.keys(kinds)),query='',token='',shared=true,allowDemo=false,initialized=false,zoom=1,toastTimer,positions=new Map(),dragged=false;
 function toast(message){$('#toast').textContent=message;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),4200);}
 function loadDemo(){try{const stored=localStorage.getItem(storageKey);ideas=stored?JSON.parse(stored):structuredClone(seed);if(!Array.isArray(ideas))throw Error();}catch{ideas=structuredClone(seed);toast('ブラウザの保存データを読めませんでした。サンプルを表示します');}try{favorites=new Set(JSON.parse(localStorage.getItem(favoriteKey)||'[]'));}catch{favorites=new Set();}}
 function saveLocal(next){try{localStorage.setItem(storageKey,JSON.stringify(next));}catch{throw Error('ブラウザに保存できません。書き出して空き容量やブラウザの設定を確認してください');}}
+function positionStorageKey(){return `${positionKey}-${shared?'shared':'demo'}`;}
+function loadPositions(){
+ positions=new Map();
+ try{
+  const stored=JSON.parse(localStorage.getItem(positionStorageKey())||'[]');
+  if(!Array.isArray(stored))return;
+  for(const entry of stored){
+   if(!Array.isArray(entry)||entry.length!==2)continue;
+   const [id,point]=entry;
+   if(typeof id==='string'&&Array.isArray(point)&&point.length===2&&point.every(Number.isFinite))positions.set(id,[Math.max(70,Math.min(930,point[0])),Math.max(70,Math.min(550,point[1]))]);
+  }
+ }catch{ /* Use the initial layout if saved positions cannot be read. */ }
+}
+function savePositions(){try{localStorage.setItem(positionStorageKey(),JSON.stringify([...positions]));}catch{toast('ノードの位置を保存できませんでした。ブラウザの保存設定や空き容量を確認してください');}}
 function visible(){return ideas.filter(v=>activeKinds.has(v.kind)&&(view!=='favorites'||favorites.has(v.id))&&[v.title,v.body,v.author,...v.tags].join(' ').toLowerCase().includes(query.toLowerCase())).sort((a,b)=>$('#sort').value==='oldest'?a.updated_at.localeCompare(b.updated_at):b.updated_at.localeCompare(a.updated_at));}
 function related(a,b){return a.related.includes(b.id)||b.related.includes(a.id)||a.tags.some(t=>b.tags.includes(t));}
 function badge(v){const k=kinds[v.kind];return `<span class="kind-badge ${k.class}"><i class="dot ${k.class}"></i>${k.name}</span>`;}
@@ -47,7 +61,7 @@ function renderGraph(rows){
  $$('.graph-node').forEach(n=>{
   n.addEventListener('click',()=>{if(!dragged){selected=n.dataset.id;render();}});
   n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=n.dataset.id;render();}});
-  n.addEventListener('pointerdown',e=>{if(e.button!==0)return;dragged=false;const start={x:e.clientX,y:e.clientY};n.setPointerCapture(e.pointerId);const move=ev=>{if(Math.hypot(ev.clientX-start.x,ev.clientY-start.y)>4)dragged=true;if(!dragged)return;const matrix=$('#graph-scene').getScreenCTM();if(!matrix)return;const p=new DOMPoint(ev.clientX,ev.clientY).matrixTransform(matrix.inverse());const pos=[Math.max(70,Math.min(930,p.x)),Math.max(70,Math.min(550,p.y))];positions.set(n.dataset.id,pos);n.setAttribute('transform',`translate(${pos[0]},${pos[1]})`);$$('.edge').forEach(edge=>{const side=edge.dataset.a===n.dataset.id?'1':edge.dataset.b===n.dataset.id?'2':null;if(side){edge.setAttribute('x'+side,pos[0]);edge.setAttribute('y'+side,pos[1]);}});};const end=()=>{n.removeEventListener('pointermove',move);n.removeEventListener('pointerup',end);n.removeEventListener('pointercancel',end);};n.addEventListener('pointermove',move);n.addEventListener('pointerup',end);n.addEventListener('pointercancel',end);});
+  n.addEventListener('pointerdown',e=>{if(e.button!==0)return;dragged=false;const start={x:e.clientX,y:e.clientY};n.setPointerCapture(e.pointerId);const move=ev=>{if(Math.hypot(ev.clientX-start.x,ev.clientY-start.y)>4)dragged=true;if(!dragged)return;const matrix=$('#graph-scene').getScreenCTM();if(!matrix)return;const p=new DOMPoint(ev.clientX,ev.clientY).matrixTransform(matrix.inverse());const pos=[Math.max(70,Math.min(930,p.x)),Math.max(70,Math.min(550,p.y))];positions.set(n.dataset.id,pos);n.setAttribute('transform',`translate(${pos[0]},${pos[1]})`);$$('.edge').forEach(edge=>{const side=edge.dataset.a===n.dataset.id?'1':edge.dataset.b===n.dataset.id?'2':null;if(side){edge.setAttribute('x'+side,pos[0]);edge.setAttribute('y'+side,pos[1]);}});};const end=()=>{if(dragged)savePositions();n.removeEventListener('pointermove',move);n.removeEventListener('pointerup',end);n.removeEventListener('pointercancel',end);};n.addEventListener('pointermove',move);n.addEventListener('pointerup',end);n.addEventListener('pointercancel',end);});
  });
  if(rows.length>40)$('#result-count').textContent=`${rows.length} 件（グラフは40件まで）`;
 }
@@ -86,8 +100,8 @@ $('#add').onclick=()=>openEditor();
 $$('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.dataset.close).close());
 $('#zoom-in').onclick=()=>{zoom=Math.min(1.6,zoom+.1);setZoom();};$('#zoom-out').onclick=()=>{zoom=Math.max(.5,zoom-.1);setZoom();};$('#zoom-reset').onclick=()=>{zoom=1;setZoom();};
 $('#settings').onclick=()=>$('#settings-dialog').showModal();
-$('#connect').onclick=async()=>{const candidate=$('#token').value.trim();if(!candidate){toast('アクセスキーを入力してください');return;}const button=$('#connect');button.disabled=true;const oldToken=token;token=candidate;try{const records=await api();shared=true;ideas=records;selected=ideas[0]?.id||null;positions=new Map();$('#token').value='';$('#settings-dialog').close();render();toast('D1 の共有ストックに接続しました。デモデータは転送されません');}catch(e){token=oldToken;toast(e.message);}finally{button.disabled=false;}};
-$('#demo-mode').onclick=()=>{if(!allowDemo)return;shared=false;token='';$('#token').value='';loadDemo();selected='s1';positions=new Map();$('#settings-dialog').close();render();toast('このブラウザのデモに戻りました');};
+$('#connect').onclick=async()=>{const candidate=$('#token').value.trim();if(!candidate){toast('アクセスキーを入力してください');return;}const button=$('#connect');button.disabled=true;const oldToken=token;token=candidate;try{const records=await api();shared=true;ideas=records;selected=ideas[0]?.id||null;loadPositions();$('#token').value='';$('#settings-dialog').close();render();toast('D1 の共有ストックに接続しました。デモデータは転送されません');}catch(e){token=oldToken;toast(e.message);}finally{button.disabled=false;}};
+$('#demo-mode').onclick=()=>{if(!allowDemo)return;shared=false;token='';$('#token').value='';loadDemo();selected='s1';loadPositions();$('#settings-dialog').close();render();toast('このブラウザのデモに戻りました');};
 $('#export').onclick=()=>{const blob=new Blob([JSON.stringify({version:1,exported_at:new Date().toISOString(),ideas},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`labhub-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('ストックをJSONで書き出しました');};
 document.addEventListener('keydown',e=>{if(e.key==='/'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)&&!$('dialog[open]')){e.preventDefault();$('#search').focus();}});
 async function initialize(){
@@ -104,7 +118,7 @@ async function initialize(){
    $('#settings-dialog p').textContent='研究室のアクセスキーを入力して、共有ストックを開いてください。';
    try{favorites=new Set(JSON.parse(localStorage.getItem(favoriteKey)||'[]'));}catch{favorites=new Set();}
   }
-  initialized=true;syncFilters();render();
+  loadPositions();initialized=true;syncFilters();render();
   if(shared)$('#settings-dialog').showModal();
  }catch(e){toast(e.message||'保存先に接続できません。ページを再読み込みしてください');}
 }

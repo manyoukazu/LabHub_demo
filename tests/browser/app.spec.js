@@ -1,4 +1,38 @@
 import {test,expect} from '@playwright/test';
+
+test('node positions survive reload and stay separate between demo and shared mode',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/api/ideas',route=>route.fulfill({json:[{id:'s1',title:'Shared node',kind:'spark',body:'',author:'',tags:[],related:[],source:'',updated_at:'2026-11-07'}]}));
+ await page.goto('/');
+ const node=page.locator('.graph-node[data-id=s1]');
+ await expect(node).toBeVisible();
+ const initial=await node.getAttribute('transform');
+ await page.locator('#zoom-in').click();
+ const box=await node.boundingBox();
+ await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+ await page.mouse.down();await page.mouse.move(box.x+box.width/2+65,box.y+box.height/2+40,{steps:8});await page.mouse.up();
+ const moved=await node.getAttribute('transform');expect(moved).not.toBe(initial);
+ await page.reload();await expect(node).toHaveAttribute('transform',moved);
+ const point=moved.match(/translate\(([^,]+),([^\)]+)\)/).slice(1);
+ const edge=page.locator('.edge[data-a=s1],.edge[data-b=s1]').first();
+ const side=await edge.getAttribute('data-a')==='s1'?'1':'2';
+ await expect(edge).toHaveAttribute('x'+side,point[0]);await expect(edge).toHaveAttribute('y'+side,point[1]);
+ await page.locator('#settings').click();await page.locator('#token').fill('local-development-key');await page.locator('#connect').click();
+ await expect(page.locator('#settings-dialog')).not.toBeVisible();await expect(node).toHaveAttribute('transform',initial);
+ const sharedBox=await node.boundingBox();
+ await page.mouse.move(sharedBox.x+sharedBox.width/2,sharedBox.y+sharedBox.height/2);
+ await page.mouse.down();await page.mouse.move(sharedBox.x+sharedBox.width/2-60,sharedBox.y+sharedBox.height/2-30,{steps:8});await page.mouse.up();
+ const sharedMoved=await node.getAttribute('transform');expect(sharedMoved).not.toBe(initial);
+ await page.locator('#settings').click();await page.locator('#demo-mode').click();await expect(node).toHaveAttribute('transform',moved);
+ await page.reload();await expect(node).toHaveAttribute('transform',moved);
+ await page.locator('#settings').click();await page.locator('#token').fill('local-development-key');await page.locator('#connect').click();await expect(node).toHaveAttribute('transform',sharedMoved);
+ expect(errors).toEqual([]);
+});
+
+test('invalid saved positions fall back to the initial layout',async({page})=>{
+ await page.addInitScript(()=>localStorage.setItem('labhub-node-positions-v1-demo',JSON.stringify([null,['s1',['bad',90]],['l1',[200,180]]])));
+ await page.goto('/');await expect(page.locator('.graph-node[data-id=s1]')).toHaveAttribute('transform','translate(490,290)');await expect(page.locator('.graph-node[data-id=l1]')).toHaveAttribute('transform','translate(200,180)');
+});
 test('production starts without sample data and requires the shared key',async({page})=>{
  await page.route('**/api/config',route=>route.fulfill({json:{allowDemo:false}}));
  await page.goto('/');await expect(page.locator('#settings-dialog')).toBeVisible();
